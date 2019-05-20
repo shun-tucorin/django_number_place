@@ -13,12 +13,12 @@ Quick start
 
     INSTALLED_APPS = [
         ...
-        'number_place',
+        'django_number_place.apps.AppConfig',
     ]
 
 2. Include the polls URLconf in your project urls.py like this::
 
-    path('number_place/', include('number_place.urls')),
+    path('number_place/', include('django_number_place.urls')),
 
 3. Run `python manage.py migrate` to create the number_place's models.
 
