@@ -13,7 +13,7 @@ Quick start
 
     INSTALLED_APPS = [
         ...
-        'django_number_place.apps.AppConfig',
+        'django_number_place.number_place.apps.AppConfig',
     ]
 
 2. Include the polls URLconf in your project urls.py like this::
