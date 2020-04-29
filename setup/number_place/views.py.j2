@@ -15,7 +15,7 @@ class View{{ key }}(View):
 		data = request.GET
 		return TemplateResponse(
 			request=request,
-			template=('{{ key }}.html',),
+			template='{{ key }}.html',
 			context={
 				'view': self,
 				'form': Form{{ key }}(data=data),
@@ -30,7 +30,7 @@ class View{{ key }}(View):
 		data = request.POST
 		return TemplateResponse(
 			request=request,
-			template=('{{ key }}.html',),
+			template='{{ key }}.html',
 			context={
 				'view': self,
 				'form': Form{{ key }}(data=data),
