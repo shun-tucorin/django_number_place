@@ -2,14 +2,9 @@
 # -*- coding: utf-8 -*-
 
 cimport cython
-from cpython.bytes cimport (
-	PyBytes_AS_STRING,
-)
 from cpython.dict cimport (
-	PyDict_Contains,
 	PyDict_GetItem,
 	PyDict_SetItem,
-	PyDict_Size,
 )
 from cpython.long cimport (
 	PyLong_AsSsize_t,
