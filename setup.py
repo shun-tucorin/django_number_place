@@ -4,11 +4,12 @@
 
 def main():
 	from Cython.Build import cythonize
-	from distutils.core import Extension, setup
 	import csv
 	from jinja2 import Environment, FileSystemLoader
 	import os
 	from pathlib import Path, PurePath
+	from setuptools import setup
+	from setuptools.extension import Extension
 
 	# allow setup.py to be run from any path
 	root_path = Path(__file__).parent
@@ -92,7 +93,7 @@ def main():
 
 	setup(
 		name='django_number_place',
-		version='0.2',
+		version='0.3',
 		packages=[
 			'django_number_place',
 			'django_number_place.number_place',
@@ -115,6 +116,7 @@ def main():
 			'Intended Audience :: Developers',
 			'License :: OSI Approved :: BSD License',
 			'Operating System :: OS Independent',
+			'Programming Language :: Python :: 3.6',
 			'Programming Language :: Python :: 3.7',
 			'Programming Language :: Python :: 3.8',
 			'Topic :: Internet :: WWW/HTTP',
@@ -122,6 +124,7 @@ def main():
 		],
 		ext_modules=cythonize(ext_modules),
 		py_modules=['django_number_place'],
+		zip_safe=False,
 	)
 
 

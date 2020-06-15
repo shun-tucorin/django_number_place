@@ -2,7 +2,7 @@
 # coding: utf-8
 
 from django.template.response import TemplateResponse
-from django.views.generic import View
+from django.views.generic.base import View
 from .forms import {% for key in forms %}{% if not loop.first %}, {% endif %}Form{{ key }}{% endfor %}
 from ._views import get_answer
 {% for key in forms %}{% set f = forms[key] %}
@@ -15,7 +15,7 @@ class View{{ key }}(View):
 		data = request.GET
 		return TemplateResponse(
 			request=request,
-			template=('{{ key }}.html',),
+			template='{{ key }}.html',
 			context={
 				'view': self,
 				'form': Form{{ key }}(data=data),
@@ -30,7 +30,7 @@ class View{{ key }}(View):
 		data = request.POST
 		return TemplateResponse(
 			request=request,
-			template=('{{ key }}.html',),
+			template='{{ key }}.html',
 			context={
 				'view': self,
 				'form': Form{{ key }}(data=data),

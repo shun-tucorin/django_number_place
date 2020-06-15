@@ -1,6 +1,6 @@
 # coding: utf-8
 
-from django.urls import path
+from django.urls.conf import path
 from .views import {% for key in forms %}{% if not loop.first %}, {% endif %}View{{ key }}{% endfor %}
 
 urlpatterns = ({% for key in forms %}

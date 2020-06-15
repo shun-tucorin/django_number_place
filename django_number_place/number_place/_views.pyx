@@ -1,15 +1,13 @@
-#cython: language_level=3
+#cython: language_level=3,warn.multiple_declarators=True,warn.undeclared=True,warn.unused=True,warn.unused_arg=False,warn.unused_result=False
 # -*- coding: utf-8 -*-
 
 cimport cython
-from cpython.bytes cimport (
-	PyBytes_AS_STRING,
-)
 from cpython.dict cimport (
-	PyDict_Contains,
 	PyDict_GetItem,
 	PyDict_SetItem,
-	PyDict_Size,
+)
+from cpython.exc cimport (
+	PyErr_Format,
 )
 from cpython.long cimport (
 	PyLong_AsSsize_t,
@@ -29,6 +27,7 @@ from cpython.object cimport (
 	Py_SIZE,
 	Py_TYPE,
 	PyObject,
+	PyObject_GetItem,
 	PyObject_Hash,
 )
 from cpython.ref cimport (
@@ -38,6 +37,7 @@ from cpython.ref cimport (
 from cpython.set cimport (
 	PySet_Add,
 	PySet_Clear,
+	PySet_Contains,
 	PySet_New,
 )
 from cpython.tuple cimport (
@@ -48,11 +48,18 @@ from cpython.tuple cimport (
 from cpython.unicode cimport (
 	PyUnicode_DecodeLatin1,
 	PyUnicode_Format,
+	PyUnicode_GET_SIZE,
 )
 from libc.stdlib cimport (
 	free,
 	malloc,
 )
+from libc.string cimport (
+	memcpy,
+)
+
+cdef extern from '<Python.h>':
+	Py_UCS4 PyUnicode_READ_CHAR(object o, Py_ssize_t index)
 
 cdef extern from '<stdlib.h>' nogil:
 	ctypedef signed short int_fast16_t
@@ -61,110 +68,324 @@ cdef extern from '<stdlib.h>' nogil:
 cdef extern from 'builtin.h' nogil:
 	int __builtin_popcount(int value)
 	int __builtin_ctz(int value)
+	void *__builtin_alloca(Py_ssize_t size)
 
 
-cdef enum:
-	NUMBER_MASK         = 0x01ff
-	NUMBER_CHANGED      = 0x0200
-	NUMBER_FIXED        = 0x0400
-	NUMBER_TEMP         = 0x0800
-	NUMBER_ERROR        = 0x1000
+DEF NUMBER_MASK         = 0x01ff
+DEF NUMBER_CHANGED      = 0x0200
+DEF NUMBER_DOUBLE_CROSS = 0x0400
+DEF NUMBER_FIXED        = 0x0800
+DEF NUMBER_TEMP         = 0x1000
+DEF NUMBER_ERROR        = 0x2000
 
-	RESULT_UNCHANGED    = 0x0
-	RESULT_CHANGED      = 0x1
-	RESULT_SOLVED       = 0x2
-	RESULT_ERROR        = 0x4
+DEF RESULT_UNCHANGED    = 0x0
+DEF RESULT_CHANGED      = 0x1
+DEF RESULT_SOLVED       = 0x2
+DEF RESULT_ERROR        = 0x4
 
-	MAX_SOLVED          = 3
+DEF MAX_SOLVED          = 3
 
-import sys
+
+cdef void sort_block_index(
+	Py_ssize_t *f_blocks,
+	Py_ssize_t index_0,
+	Py_ssize_t index_1
+) nogil:
+	cdef Py_ssize_t index_2 = index_1 - index_0
+	cdef Py_ssize_t index_3
+	cdef Py_ssize_t index_4
+	cdef Py_ssize_t value_0
+	cdef Py_ssize_t value_1
+	cdef Py_ssize_t *values
+
+	if index_2 <= 1:
+		pass
+	elif index_2 == 2:
+		value_0 = f_blocks[index_0 + 0]
+		value_1 = f_blocks[index_0 + 1]
+		if value_0 < value_1:
+			f_blocks[index_0 + 0] = value_0
+			f_blocks[index_0 + 1] = value_1
+		else:
+			f_blocks[index_0 + 0] = value_1
+			f_blocks[index_0 + 1] = value_0
+	else:
+		index_2 = (index_2 // 2)
+		index_3 = index_0 + index_2
+		sort_block_index(f_blocks, index_0, index_3)
+		sort_block_index(f_blocks, index_3, index_1)
+
+		values = <Py_ssize_t *>(
+			__builtin_alloca(sizeof(f_blocks[0]) * index_2)
+		)
+		memcpy(
+			values,
+			f_blocks + index_0,
+			index_2 * sizeof(f_blocks[0])
+		)
+
+		index_0 = 0
+		index_4 = 0
+		# index_0: result index
+		# index_1: right-side end
+		# index_2: left-side end
+		# index_3: right-side index
+		# index_4: left-side index
+		# value_0: right_side value (cached)
+		# value_1: left_side value (cached)
+		value_0 = f_blocks[index_3]
+		value_1 = values[index_4]
+		while True:
+			if value_0 < value_1:
+				f_blocks[index_0] = value_0
+				index_0 += 1
+				index_3 += 1
+				if index_3 == index_1:
+					index_4 += 1
+					f_blocks[index_0] = value_1
+					memcpy(
+						f_blocks + index_0 + 1,
+						values + index_4,
+						index_2 - index_4
+					)
+					break
+				value_0 = f_blocks[index_3]
+			else:
+				f_blocks[index_0] = value_1
+				index_0 += 1
+				index_4 += 1
+				if index_4 == index_2:
+					index_3 += 1
+					f_blocks[index_0] = value_0
+					memcpy(
+						f_blocks + index_0 + 1,
+						f_blocks + index_2,
+						index_1 - index_3
+					)
+					break
+				value_1 = values[index_4]
+
+
+cdef inline void copy_block_index(
+	Py_ssize_t *f_blocks_dst,
+	Py_ssize_t *f_blocks_src
+) nogil:
+	memcpy(f_blocks_dst, f_blocks_src, sizeof(f_blocks_src[0]) * 9)
+	sort_block_index(f_blocks_src, 0, 9)
 
 
 cdef object parse_blocks(
 	object form_blocks,
-	Py_ssize_t *blocks
+	Py_ssize_t *f_blocks
 ):
 	cdef Py_ssize_t index_0
 	cdef Py_ssize_t index_1
 	cdef Py_ssize_t index_2
-	cdef object names = {}
+	cdef object name_indexes = {}
 	cdef object field_names = []
+	cdef object names = set()
 	cdef object block
-	cdef object name
+	cdef object value_1
 	cdef object namedtuple
+	cdef object row_block_indexes = []
+	cdef object col_block_indexes = []
+	cdef object other_block_indexes = []
+	cdef Py_UCS4 row_name
+	cdef Py_UCS4 col_name
 	cdef PyObject *object_0
+	cdef Py_ssize_t *temp_blocks
 
 	from collections import namedtuple
 
-	for index_0 in range(Py_SIZE(form_blocks)):
-		block = <tuple?>(<object>(PyTuple_GET_ITEM(form_blocks, index_0)))
-		if Py_SIZE(block) < 9:
-			raise ValueError()
-		for index_1 in range(9):
-			name = <object>(PyTuple_GET_ITEM(block, index_1))
-			if (name == 'method'):
-				raise ValueError()
-			object_0 = PyDict_GetItem(names, name)
-			if object_0 is NULL:
-				index_2 = Py_SIZE(field_names)
-				PyDict_SetItem(names, name, PyLong_FromSsize_t(index_2))
-				PyList_Append(field_names, name)
+	temp_blocks = <Py_ssize_t *>(
+		malloc(Py_SIZE(form_blocks) * 9 * sizeof(f_blocks[0]))
+	)
+	if temp_blocks is NULL:
+		raise MemoryError()
+	try:
+		for index_0 in range(Py_SIZE(form_blocks)):
+			block = <tuple?>(PyTuple_GET_ITEM(form_blocks, index_0))
+			if Py_SIZE(block) < 9:
+				raise ValueError(
+					PyUnicode_Format(
+						"%s: The tuple length must be 9.",
+						(repr(block),)
+					)
+				)
+
+			row_name = 0
+			col_name = 0
+			PySet_Clear(names)
+			for index_1 in range(9):
+				value_1 = <unicode?>(PyTuple_GET_ITEM(block, index_1))
+				if PyUnicode_GET_SIZE(value_1) != 2:
+					raise ValueError(
+						PyUnicode_Format(
+							"%s: The length must be 2.",
+							(value_1,)
+						)
+					)
+				if PySet_Contains(names, value_1) > 0:
+					raise ValueError(
+						PyUnicode_Format(
+							"%s: Duplicate name.",
+							(value_1,)
+						)
+					)
+				PySet_Add(names, value_1)
+
+				if index_1 == 0:
+					row_name = PyUnicode_READ_CHAR(value_1, 0)
+					col_name = PyUnicode_READ_CHAR(value_1, 1)
+				else:
+					if row_name != 0:
+						if PyUnicode_READ_CHAR(value_1, 0) != row_name:
+							row_name = 0
+					if col_name != 0:
+						if PyUnicode_READ_CHAR(value_1, 1) != col_name:
+							col_name = 0
+
+				object_0 = PyDict_GetItem(name_indexes, value_1)
+				if object_0 is NULL:
+					index_2 = Py_SIZE(field_names)
+					PyDict_SetItem(name_indexes, value_1, PyLong_FromSsize_t(index_2))
+					PyList_Append(field_names, value_1)
+				else:
+					index_2 = PyLong_AsSsize_t(<object>(object_0))
+				temp_blocks[index_0 * 9 + index_1] = index_2
+
+			value_1 = PyLong_FromSsize_t(index_0)
+			if row_name != 0:
+				PyList_Append(row_block_indexes, value_1)
+			elif col_name != 0:
+				PyList_Append(col_block_indexes, value_1)
 			else:
-				index_2 = PyLong_AsSsize_t(<object>(object_0))
-			blocks[index_0 * 9 + index_1] = index_2
-	blocks[Py_SIZE(form_blocks) * 9] = -1
+				PyList_Append(other_block_indexes, value_1)
+
+		# adding horizontal block
+		f_blocks[0] = Py_SIZE(field_names)
+		f_blocks[1] = Py_SIZE(row_block_indexes)
+		index_1 = 2
+		for index_0 in range(Py_SIZE(row_block_indexes)):
+			index_2 = PyLong_AsSsize_t(
+				<object>(PyList_GET_ITEM(row_block_indexes, index_0))
+			)
+			copy_block_index(
+				&f_blocks[index_1 + index_0 * 9],
+				&temp_blocks[index_2 * 9],
+			)
+
+		# adding vertical block
+		index_1 += Py_SIZE(row_block_indexes) * 9
+		f_blocks[index_1] = Py_SIZE(col_block_indexes)
+		index_1 += 1
+		for index_0 in range(Py_SIZE(col_block_indexes)):
+			index_2 = PyLong_AsSsize_t(
+				<object>(PyList_GET_ITEM(col_block_indexes, index_0))
+			)
+			copy_block_index(
+				&f_blocks[index_1 + index_0 * 9],
+				&temp_blocks[index_2 * 9],
+			)
+
+		# adding other block
+		index_1 += Py_SIZE(col_block_indexes) * 9
+		f_blocks[index_1] = Py_SIZE(other_block_indexes)
+		index_1 += 1
+		for index_0 in range(Py_SIZE(other_block_indexes)):
+			index_2 = PyLong_AsSsize_t(
+				<object>(PyList_GET_ITEM(other_block_indexes, index_0))
+			)
+			copy_block_index(
+				&f_blocks[index_1 + index_0 * 9],
+				&temp_blocks[index_2 * 9],
+			)
+
+		index_1 += Py_SIZE(other_block_indexes) * 9
+		f_blocks[index_1] = 0
+
+	finally:
+		free(temp_blocks)
 
 	PyList_Append(field_names, 'method')
 	return namedtuple(
 		PyUnicode_Format(
 			'Place%x',
 			(
-				PyLong_FromSize_t(PyObject_Hash(PyList_AsTuple(field_names))),
+				PyLong_FromSize_t(
+					PyObject_Hash(PyList_AsTuple(field_names))
+				),
 			)
 		),
 		field_names
 	)
 
 
-cdef Py_ssize_t check_numbers(
-	const Py_ssize_t *form_blocks,
-	int_least16_t *numbers
+cdef inline Py_ssize_t check_numbers_block(
+	const Py_ssize_t *f_blocks,
+	int_least16_t *numbers,
+	Py_ssize_t result
 ) nogil:
-	cdef Py_ssize_t result = RESULT_SOLVED
 	cdef Py_ssize_t solved_indexes[9]
-	cdef Py_ssize_t index_0 = 0
+	cdef Py_ssize_t index_0
 	cdef Py_ssize_t index_1
 	cdef Py_ssize_t index_2
 	cdef Py_ssize_t index_3
-	cdef Py_ssize_t index_4
 	cdef int_fast16_t value_0
 	cdef int_fast16_t value_1
 
-	# if form data isn't empty, checking numbers.
-	while form_blocks[index_0] >= 0:
-		# initializing registered numbers (-1: unused)
-		for index_1 in range(9):
-			solved_indexes[index_1] = -1
+	# initializing registered numbers (-1: unused)
+	for index_0 in range(9):
+		solved_indexes[index_0] = -1
 
-		for index_1 in range(9):
-			index_2 = form_blocks[index_0 + index_1]
-			value_0 = numbers[index_2]
-			value_1 = (value_0 & NUMBER_MASK)
-			if value_1 == 0:
-				numbers[index_2] = <int_least16_t>(value_0 | NUMBER_ERROR)
+	for index_0 in range(9):
+		index_1 = f_blocks[index_0]
+		value_0 = <int_fast16_t>(numbers[index_1])
+		value_1 = <int_fast16_t>(value_0 & NUMBER_MASK)
+		if value_1 == 0:
+			numbers[index_1] = <int_least16_t>(
+				value_0 | NUMBER_ERROR
+			)
+			result |= RESULT_ERROR
+		elif __builtin_popcount(value_1) == 1:
+			index_3 = __builtin_ctz(value_1)
+			index_2 = solved_indexes[index_3]
+			if index_2 >= 0:
+				# found multiple solved number.
+				numbers[index_1] = <int_least16_t>(
+					value_0 | NUMBER_ERROR
+				)
+				numbers[index_2] = <int_least16_t>(
+					numbers[index_2] | NUMBER_ERROR
+				)
 				result |= RESULT_ERROR
-			elif __builtin_popcount(value_1) == 1:
-				index_4 = __builtin_ctz(value_1)
-				index_3 = solved_indexes[index_4]
-				if index_3 >= 0:
-					# found multiple solved number.
-					numbers[index_2] = <int_least16_t>(value_0 | NUMBER_ERROR)
-					numbers[index_3] = <int_least16_t>(numbers[index_3] | NUMBER_ERROR)
-					result |= RESULT_ERROR
-				solved_indexes[index_4] = index_2
-			else:
-				result &= (~RESULT_SOLVED)
-		index_0 += 9
+			solved_indexes[index_3] = index_1
+		else:
+			result &= (~RESULT_SOLVED)
+
+	return result
+
+
+cdef Py_ssize_t check_numbers(
+	const Py_ssize_t *f_blocks,
+	int_least16_t *numbers
+) nogil:
+	cdef Py_ssize_t result = RESULT_SOLVED
+	cdef Py_ssize_t index_0 = 1
+	cdef Py_ssize_t index_1
+	cdef Py_ssize_t index_2
+
+	index_1 = f_blocks[index_0]
+	while index_1 > 0:
+		index_0 += 1
+		for index_2 in range(index_1):
+			result = check_numbers_block(
+				f_blocks + (index_0 + index_2 * 9),
+				numbers,
+				result
+			)
+		index_0 += index_1 * 9
+		index_1 = f_blocks[index_0]
 
 	return result
 
@@ -172,32 +393,33 @@ cdef Py_ssize_t check_numbers(
 cdef Py_ssize_t parse_data(
 	object form_data,
 	object place_fields,
-	const Py_ssize_t *form_blocks,
+	const Py_ssize_t *f_blocks,
 	int_least16_t *numbers,
 ) except -1:
-	cdef Py_ssize_t result = 0
+	cdef Py_ssize_t result = RESULT_UNCHANGED
 	cdef Py_ssize_t index_0
 	cdef Py_ssize_t index_1
-	cdef object name
 	cdef object value_0
 
 	# reading data from
-	for index_0 in range(Py_SIZE(place_fields) - 1):
-		name = <object>(PyTuple_GET_ITEM(place_fields, index_0))
+	for index_0 in range(f_blocks[0]):
+		value_0 = <object>(PyTuple_GET_ITEM(place_fields, index_0))
 		try:
 			# if number is undefined, raise IndexError or ValueError
-			index_1 = PyLong_AsSsize_t(PyNumber_Long(form_data[name]))
+			index_1 = PyLong_AsSsize_t(
+				PyNumber_Long(
+					PyObject_GetItem(form_data, value_0)
+				)
+			)
 			if 1 <= index_1 and index_1 <= 9:
-				numbers[index_0] = <int_least16_t>((1 << (index_1 - 1)) | NUMBER_FIXED)
+				numbers[index_0] = <int_least16_t>(
+					(1 << (index_1 - 1)) | NUMBER_FIXED
+				)
 				result |= RESULT_CHANGED
 				continue
 		except:
 			pass
 		numbers[index_0] = NUMBER_MASK
-
-	if result != 0:
-		# if form data isn't empty, checking numbers.
-		result |= check_numbers(form_blocks, numbers)
 
 	return result
 
@@ -209,195 +431,456 @@ cdef object make_place(
 	object method
 ):
 	cdef Py_ssize_t index_0
-	cdef int_fast16_t value_0
 	cdef object values = PyTuple_New(form_name_count + 1)
-	cdef object value_1
+	cdef object value_0
 
 	for index_0 in range(form_name_count):
-		value_1 = Cell()
-		(<Cell>(value_1)).value_0 = <int_fast16_t>(numbers[index_0])
-		Py_INCREF(value_1)
-		PyTuple_SET_ITEM(values, index_0, value_1)
+		value_0 = Cell()
+		(<Cell>(value_0)).value_0 = <int_fast16_t>(numbers[index_0])
+		Py_INCREF(value_0)
+		PyTuple_SET_ITEM(values, index_0, value_0)
 	Py_INCREF(method)
 	PyTuple_SET_ITEM(values, form_name_count + 0, method)
 	return place_class(*values)
 
 
-cdef Py_ssize_t solve_method1(
-	Py_ssize_t form_name_count,
-	const Py_ssize_t *form_blocks,
-	int_least16_t *numbers
+cdef inline Py_ssize_t solve_method1_block(
+	const Py_ssize_t *f_blocks,
+	int_least16_t *numbers,
+	Py_ssize_t index_0,
+	Py_ssize_t result
 ) nogil:
-	cdef Py_ssize_t result = 0
-	cdef Py_ssize_t index_0 = 0
 	cdef Py_ssize_t index_1
 	cdef Py_ssize_t index_2
-	cdef Py_ssize_t index_3
 	cdef int_fast16_t value_0
 	cdef int_fast16_t value_1
-	cdef int_fast16_t value_2
-	cdef Py_ssize_t indexes_0
+	cdef int_fast16_t value_2 = -1
+	cdef Py_ssize_t indexes_0 = 0
 
-	# if number is fixed or solved, other numbers in block reduce fixed number.
-	while form_blocks[index_0] >= 0:
-		# finding solved indexes
-		indexes_0 = 0
-		value_2 = -1
-		for index_1 in range(9):
-			index_2 = form_blocks[index_0 + index_1]
-			value_0 = (numbers[index_2 + form_name_count] & NUMBER_MASK)
-			if __builtin_popcount(value_0) == 1:
-				value_2 &= (~value_0)
-				indexes_0 |= (1 << index_1)
+	# finding solved indexes
+	for index_1 in range(9):
+		index_2 = f_blocks[index_0 + index_1]
+		value_0 = <int_fast16_t>(
+			numbers[index_2 + f_blocks[0]] & NUMBER_MASK
+		)
+		if __builtin_popcount(value_0) == 1:
+			value_2 = <int_fast16_t>(value_2 & (~value_0))
+			indexes_0 |= (1 << index_1)
 
+
+	if value_2 != -1:
 		for index_1 in range(9):
 			if (indexes_0 & (1 << index_1)) == 0:
-				index_2 = form_blocks[index_0 + index_1]
-				value_0 = numbers[index_2]
-				value_1 = (value_0 & value_2)
+				index_2 = f_blocks[index_0 + index_1]
+				value_0 = <int_fast16_t>(numbers[index_2])
+				value_1 = <int_fast16_t>(value_0 & value_2)
 				if value_1 != value_0:
-					numbers[index_2] = <int_least16_t>(value_1 | NUMBER_CHANGED)
+					numbers[index_2] = <int_least16_t>(
+						value_1 | NUMBER_CHANGED
+					)
 					result |= RESULT_CHANGED
-		index_0 += 9
-
-	if result != 0:
-		# if form data isn't empty, checking numbers.
-		result |= check_numbers(form_blocks, numbers)
 
 	return result
 
 
-cdef Py_ssize_t solve_method2(
-	Py_ssize_t form_name_count,
-	const Py_ssize_t *form_blocks,
+cdef inline Py_ssize_t solve_method1(
+	const Py_ssize_t *f_blocks,
 	int_least16_t *numbers
 ) nogil:
-	cdef Py_ssize_t result = 0
-	cdef Py_ssize_t index_0 = 0
+	cdef Py_ssize_t result = RESULT_UNCHANGED
+	cdef Py_ssize_t index_0 = 1
 	cdef Py_ssize_t index_1
+	cdef Py_ssize_t index_2
+
+	index_1 = f_blocks[index_0]
+	while index_1 > 0:
+		index_0 += 1
+		for index_2 in range(index_1):
+			result = solve_method1_block(
+				f_blocks,
+				numbers,
+				index_0 + index_2 * 9,
+				result
+			)
+
+		index_0 += index_1 * 9
+		index_1 = f_blocks[index_0]
+
+	return result
+
+
+cdef inline Py_ssize_t solve_method2_block(
+	const Py_ssize_t *f_blocks,
+	int_least16_t *numbers,
+	Py_ssize_t index_0,
+	Py_ssize_t result
+) nogil:
+	cdef Py_ssize_t index_1
+	cdef Py_ssize_t index_2
+	cdef int_fast16_t value_0
+	cdef int_fast16_t value_1
+	cdef int_fast16_t value_2 = 0
+	cdef int_fast16_t value_3
+	cdef int_fast16_t value_4
+	cdef Py_ssize_t indexes_0 = 0
+	cdef Py_ssize_t indexes_1
+
+	# finding solved indexes
+	for index_1 in range(9):
+		index_2 = f_blocks[index_0 + index_1]
+		value_0 = (numbers[index_2 + f_blocks[0]] & NUMBER_MASK)
+		if __builtin_popcount(value_0) == 1:
+			value_2 |= value_0
+			indexes_0 |= (1 << index_1)
+
+	for value_3 in range(1, NUMBER_MASK):
+		if (value_3 & value_2) != 0:
+			continue
+
+		indexes_1 = 0
+		for index_1 in range(9):
+			if (indexes_0 & (1 << index_1)) == 0:
+				index_2 = f_blocks[index_0 + index_1]
+				value_0 = numbers[index_2 + f_blocks[0]]
+				if (value_0 & value_3) != 0:
+					indexes_1 |= (1 << index_1)
+
+		if __builtin_popcount(indexes_1) != __builtin_popcount(value_3):
+			continue
+
+		value_4 = (~value_3)
+		value_3 |= (~NUMBER_MASK)
+		for index_1 in range(9):
+			if (indexes_0 & (1 << index_1)) == 0:
+				index_2 = f_blocks[index_0 + index_1]
+				value_0 = numbers[index_2]
+				if (indexes_1 & (1 << index_1)) != 0:
+					value_1 = (value_0 & value_3)
+				else:
+					value_1 = (value_0 & value_4)
+				if value_1 != value_0:
+					numbers[index_2] = <int_least16_t>(
+						value_1 | NUMBER_CHANGED
+					)
+					result |= RESULT_CHANGED
+
+	return result
+
+
+cdef inline Py_ssize_t solve_method2(
+	const Py_ssize_t *f_blocks,
+	int_least16_t *numbers
+) nogil:
+	cdef Py_ssize_t result = RESULT_UNCHANGED
+	cdef Py_ssize_t index_0 = 1
+	cdef Py_ssize_t index_1
+	cdef Py_ssize_t index_2
+
+	index_1 = f_blocks[index_0]
+	while index_1 > 0:
+		index_0 += 1
+		for index_2 in range(index_1):
+			result = solve_method2_block(
+				f_blocks,
+				numbers,
+				index_0 + index_2 * 9,
+				result
+			)
+		index_0 += index_1 * 9
+		index_1 = f_blocks[index_0]
+
+	return result
+
+
+cdef Py_ssize_t solve_method3a_find(
+	const Py_ssize_t *f_blocks,
+	Py_ssize_t index_0,
+	Py_ssize_t index_1,
+	Py_ssize_t value_0
+) nogil:
+	cdef Py_ssize_t index_2
+	cdef Py_ssize_t value_1
+
+	while index_0 <= index_1:
+		index_2 = (index_0 + index_1) // 2
+		value_1 = f_blocks[index_2]
+		if value_1 == value_0:
+			return index_2
+		elif value_1 < value_0:
+			index_0 = index_2 + 1
+		else:
+			index_1 = index_2 - 1
+
+	return - index_0 - 1
+
+
+cdef Py_ssize_t solve_method3_replace(
+	const Py_ssize_t *f_blocks,
+	int_least16_t *numbers,
+	Py_ssize_t index_0,
+	Py_ssize_t index_1,
+	Py_ssize_t value_0
+) nogil:
+	cdef Py_ssize_t result = RESULT_UNCHANGED
+	cdef Py_ssize_t index_2
+	cdef Py_ssize_t index_3
+	cdef int_fast16_t value_1
+	cdef int_fast16_t value_2
+
+	for index_2 in range(index_0):
+		index_3 = f_blocks[index_2]
+		value_1 = <int_fast16_t>(numbers[index_3])
+		value_2 = <int_fast16_t>(value_1 & value_0)
+		if value_2 != value_1:
+			numbers[index_3] = <int_least16_t>(
+				value_2 | NUMBER_CHANGED
+			)
+			result |= RESULT_CHANGED
+
+	for index_2 in range(index_0 + 1, index_1):
+		index_3 = f_blocks[index_2]
+		value_1 = <int_fast16_t>(numbers[index_3])
+		value_2 = <int_fast16_t>(value_1 & value_0)
+		if value_2 != value_1:
+			numbers[index_3] = <int_least16_t>(
+				value_2 | NUMBER_CHANGED
+			)
+			result |= RESULT_CHANGED
+
+	for index_2 in range(index_1 + 1, 9):
+		index_3 = f_blocks[index_2]
+		value_1 = <int_fast16_t>(numbers[index_3])
+		value_2 = <int_fast16_t>(value_1 & value_0)
+		if value_2 != value_1:
+			numbers[index_3] = <int_least16_t>(
+				value_2 | NUMBER_CHANGED
+			)
+			result |= RESULT_CHANGED
+
+	return result
+
+
+cdef struct DoubleCrossItem:
+	DoubleCrossItem *indexes_0
+	Py_ssize_t index_0
+	Py_ssize_t index_1
+
+
+cdef Py_ssize_t solve_method3a(
+	const Py_ssize_t *f_blocks,
+	int_least16_t *numbers,
+	Py_ssize_t index_0,
+	Py_ssize_t index_1,
+	int_fast16_t value_0
+) nogil:
+	cdef Py_ssize_t result = RESULT_UNCHANGED
 	cdef Py_ssize_t index_2
 	cdef Py_ssize_t index_3
 	cdef Py_ssize_t index_4
 	cdef Py_ssize_t index_5
-	cdef int_fast16_t value_0
-	cdef int_fast16_t value_1
-	cdef int_fast16_t value_2
-	cdef int_fast16_t value_3
-	cdef int_fast16_t value_4
-	cdef Py_ssize_t indexes_0
+	cdef Py_ssize_t index_6
+	cdef Py_ssize_t index_7
+	cdef Py_ssize_t index_8
+	cdef Py_ssize_t index_9
+	cdef Py_ssize_t index_a
+	cdef Py_ssize_t index_b
+	cdef Py_ssize_t index_c
+	cdef Py_ssize_t index_d
+	cdef DoubleCrossItem *indexes_0
+	cdef DoubleCrossItem *indexes_1
+	cdef DoubleCrossItem *indexes_2[1]
+	cdef DoubleCrossItem **indexes_3 = indexes_2
 
-	while form_blocks[index_0] >= 0:
-		indexes_0 = 0
-		value_2 = 0
-		for index_1 in range(9):
-			if (indexes_0 & (1 << index_1)) == 0:
-				index_2 = form_blocks[index_0 + index_1]
-				value_0 = numbers[index_2 + form_name_count]
-				value_2 = (value_0 & NUMBER_MASK)
-				if __builtin_popcount(value_2) == 2:
-					index_2 = -1
-					for index_3 in range(index_1 + 1, 9):
-						index_4 = form_blocks[index_0 + index_3]
-						value_0 = (numbers[index_4 + form_name_count] & NUMBER_MASK)
-						if value_0 == value_2:
-							if index_2 >= 0:
+	indexes_2[0] = NULL
+
+	# finding a pair of candidate items
+	for index_2 in range(f_blocks[index_0]):
+		# finding 1st candidate index
+		for index_5 in range(9):
+			index_3 = f_blocks[
+				index_0 + 1 + index_2 * 9 + index_5
+			]
+			if (numbers[index_3 + f_blocks[0]] & value_0) != 0:
+				# finding 2nd candidate index
+				for index_6 in range(index_5 + 1, 9):
+					index_4 = f_blocks[
+						index_0 + 1 + index_2 * 9 + index_6
+					]
+					if (numbers[index_4 + f_blocks[0]] & value_0) != 0:
+						# finding 3rd candidate index
+						for index_7 in range(index_6 + 1, 9):
+							index_8 = f_blocks[
+								index_0 + 1 + index_2 * 9 + index_7
+							]
+							if (numbers[index_8 + f_blocks[0]] & value_0) != 0:
 								break
-							index_2 = index_3
-					else:
-						if index_2 >= 0:
-							value_2 = (~value_2)
-							for index_3 in range(index_1):
-								index_4 = form_blocks[index_0 + index_3]
-								value_0 = (numbers[index_4] & NUMBER_MASK)
-								value_1 = (value_0 & value_2)
-								if value_1 != value_0:
-									numbers[index_4] = <int_least16_t>(value_1 | NUMBER_CHANGED)
-									result |= RESULT_CHANGED
-							for index_3 in range(index_1 + 1, index_2):
-								index_4 = form_blocks[index_0 + index_3]
-								value_0 = (numbers[index_4] & NUMBER_MASK)
-								value_1 = (value_0 & value_2)
-								if value_1 != value_0:
-									numbers[index_4] = <int_least16_t>(value_1 | NUMBER_CHANGED)
-									result |= RESULT_CHANGED
-							for index_3 in range(index_2 + 1, 9):
-								index_4 = form_blocks[index_0 + index_3]
-								value_0 = (numbers[index_4] & NUMBER_MASK)
-								value_1 = (value_0 & value_2)
-								if value_1 != value_0:
-									numbers[index_4] = <int_least16_t>(value_1 | NUMBER_CHANGED)
-									result |= RESULT_CHANGED
-		index_0 += 9
+						else:
+							# found only 2 candicate indexes
+							indexes_0 = <DoubleCrossItem *>(
+								__builtin_alloca(sizeof(DoubleCrossItem))
+							)
+							indexes_0.indexes_0 = NULL
+							indexes_0.index_0 = index_3
+							indexes_0.index_1 = index_4
+							indexes_3[0] = indexes_0
+							indexes_3 = (&(indexes_0.indexes_0))
 
-	if result != 0:
-		# if form data isn't empty, checking numbers.
-		result |= check_numbers(form_blocks, numbers)
+						break
+				break
+
+	indexes_0 = indexes_2[0]
+	value_0 = (~value_0)
+	while indexes_0 is not NULL:
+		index_8 = indexes_0.index_0
+		index_9 = indexes_0.index_1
+		indexes_0 = indexes_0.indexes_0
+		if indexes_0 is NULL:
+			break
+
+		for index_6 in range(f_blocks[index_1]):
+			# finding part of double cross indexes
+			index_2 = solve_method3a_find(
+				f_blocks + (index_1 + 1 + index_6 * 9),
+				0,
+				9 - 1,
+				index_8
+			)
+			if index_2 < 0:
+				index_2 = solve_method3a_find(
+					f_blocks + (index_1 + 1 + index_6 * 9),
+					- index_2 - 1,
+					9 - 1,
+					index_9
+				)
+				if index_2 < 0:
+					continue
+				index_c = index_8
+			else:
+				index_c = index_9
+
+			indexes_1 = indexes_0
+			while indexes_1 is not NULL:
+				index_a = indexes_1.index_0
+				index_b = indexes_1.index_1
+				indexes_1 = indexes_1.indexes_0
+
+				# finding another part of double cross indexes
+				index_3 = solve_method3a_find(
+					f_blocks + (index_1 + 1 + index_6 * 9),
+					0,
+					9 - 1,
+					index_a
+				)
+				if index_3 < 0:
+					index_3 = solve_method3a_find(
+						f_blocks + (index_1 + 1 + index_6 * 9),
+						- index_3 - 1,
+						9 - 1,
+						index_b
+					)
+					if index_3 < 0:
+						continue
+					index_d = index_a
+				else:
+					index_d = index_b
+
+				if index_c > index_d:
+					index_7 = index_d
+					index_d = index_c
+					index_c = index_7
+
+				for index_7 in range(index_6 + 1, f_blocks[index_1]):
+					index_4 = solve_method3a_find(
+						f_blocks + (index_1 + 1 + index_7 * 9),
+						0,
+						9 - 1,
+						index_c
+					)
+					if index_4 < 0:
+						continue
+					index_5 = solve_method3a_find(
+						f_blocks + (index_1 + 1 + index_7 * 9),
+						index_4 + 1,
+						9 - 1,
+						index_d
+					)
+					if index_5 < 0:
+						continue
+
+					# removing bits: value_0 (a pair of candidate numbers)
+					if index_2 < index_3:
+						result |= solve_method3_replace(
+							f_blocks + (index_1 + 1 + index_6 * 9),
+							numbers,
+							index_2,
+							index_3,
+							value_0
+						)
+					else:
+						result |= solve_method3_replace(
+							f_blocks + (index_1 + 1 + index_6 * 9),
+							numbers,
+							index_3,
+							index_2,
+							value_0
+						)
+					result |= solve_method3_replace(
+						f_blocks + (index_1 + 1 + index_7 * 9),
+						numbers,
+						index_4,
+						index_5,
+						value_0
+					)
+					if result != RESULT_UNCHANGED:
+						numbers[index_8] = <int_least16_t>(
+							numbers[index_8] | NUMBER_DOUBLE_CROSS
+						)
+						numbers[index_9] = <int_least16_t>(
+							numbers[index_9] | NUMBER_DOUBLE_CROSS
+						)
+						numbers[index_a] = <int_least16_t>(
+							numbers[index_a] | NUMBER_DOUBLE_CROSS
+						)
+						numbers[index_b] = <int_least16_t>(
+							numbers[index_b] | NUMBER_DOUBLE_CROSS
+						)
+						return result
+					break
 
 	return result
 
 
 cdef Py_ssize_t solve_method3(
-	Py_ssize_t form_name_count,
-	const Py_ssize_t *form_blocks,
+	const Py_ssize_t *f_blocks,
 	int_least16_t *numbers
 ) except -1:
-	cdef Py_ssize_t result = 0
-	cdef Py_ssize_t index_0 = 0
-	cdef Py_ssize_t index_1
-	cdef Py_ssize_t index_2
-	cdef Py_ssize_t index_3
+	cdef Py_ssize_t result
 	cdef int_fast16_t value_0
-	cdef int_fast16_t value_1
-	cdef int_fast16_t value_2
-	cdef int_fast16_t value_3
-	cdef int_fast16_t value_4
-	cdef Py_ssize_t indexes_0
-	cdef Py_ssize_t indexes_1
 
+	for value_0 in range(9):
+		# check vertical block, filter horizontal block
+		result = solve_method3a(
+			f_blocks,
+			numbers,
+			1,
+			f_blocks[1] * 9 + 2,
+			1 << value_0
+		)
+		if result != RESULT_UNCHANGED:
+			break
 
-	while form_blocks[index_0] >= 0:
-		# finding solved indexes
-		indexes_0 = 0
-		value_2 = 0
-		for index_1 in range(9):
-			index_2 = form_blocks[index_0 + index_1]
-			value_0 = (numbers[index_2 + form_name_count] & NUMBER_MASK)
-			if __builtin_popcount(value_0) == 1:
-				value_2 |= value_0
-				indexes_0 |= (1 << index_1)
-
-		for value_3 in range(1, NUMBER_MASK):
-			if (value_3 & value_2) == 0:
-				indexes_1 = 0
-				for index_1 in range(9):
-					if (indexes_0 & (1 << index_1)) == 0:
-						index_2 = form_blocks[index_0 + index_1]
-						value_0 = numbers[index_2 + form_name_count]
-						if (value_0 & value_3) != 0:
-							indexes_1 |= (1 << index_1)
-
-				if __builtin_popcount(indexes_1) == __builtin_popcount(value_3):
-					value_4 = (~value_3)
-					value_3 |= (~NUMBER_MASK)
-					for index_1 in range(9):
-						if (indexes_0 & (1 << index_1)) == 0:
-							index_2 = form_blocks[index_0 + index_1]
-							value_0 = numbers[index_2]
-							if (indexes_1 & (1 << index_1)) != 0:
-								value_1 = (value_0 & value_3)
-							else:
-								value_1 = (value_0 & value_4)
-							if value_1 != value_0:
-								numbers[index_2] = <int_least16_t>(value_1 | NUMBER_CHANGED)
-								result |= RESULT_CHANGED
-		index_0 += 9
-
-	if result != 0:
-		# if form data isn't empty, checking numbers.
-		result |= check_numbers(form_blocks, numbers)
+		# check horizontal block, filter vertical block
+		result = solve_method3a(
+			f_blocks,
+			numbers,
+			f_blocks[1] * 9 + 2,
+			1,
+			1 << value_0
+		)
+		if result != RESULT_UNCHANGED:
+			break
 
 	return result
-
 
 @cython.auto_pickle(False)
 @cython.final
@@ -410,139 +893,144 @@ cdef class Answer():
 	cdef Py_ssize_t solve(
 		self,
 		object place_class,
-		Py_ssize_t form_name_count,
-		const Py_ssize_t *form_blocks,
+		const Py_ssize_t *f_blocks,
 		int_least16_t *numbers,
 		Py_ssize_t solved_count,
 		Py_ssize_t temp_index
 	) except -1:
 		cdef Py_ssize_t result
+		cdef Py_ssize_t new_solved_count
 		cdef Py_ssize_t index_0
 		cdef Py_ssize_t index_1
 		cdef int_fast16_t value_0
 		cdef int_fast16_t value_1
-		cdef int_fast16_t value_2
 		cdef int_least16_t *next_numbers
 		cdef object child
 		cdef object _places = []
-		cdef object _children
+		cdef object _children_all
+		cdef object _children_solved
 
-		if temp_index >= 0:
-			result = check_numbers(form_blocks, numbers)
+
+		result = check_numbers(f_blocks, numbers)
+		if (result & (RESULT_SOLVED | RESULT_ERROR)) != 0:
 			PyList_Append(
 				_places,
-				make_place(place_class, form_name_count, numbers, 4)
+				make_place(
+					place_class,
+					f_blocks[0],
+					numbers,
+					0 if temp_index < 0 else 4
+				)
 			)
-			if (result & (RESULT_SOLVED | RESULT_ERROR)) != 0:
-				if (result & (RESULT_SOLVED)) != 0:
-					solved_count += 1
-				self._places = PyList_AsTuple(_places)
-				return solved_count
+			self._places = PyList_AsTuple(_places)
+			return ((result & (RESULT_SOLVED)) != 0)
 
+		if temp_index >= 0:
+			PyList_Append(
+				_places,
+				make_place(place_class, f_blocks[0], numbers, 4)
+			)
 			numbers[temp_index] = <int_least16_t>(
-				numbers[temp_index] | NUMBER_TEMP
+				(numbers[temp_index] & (~(NUMBER_CHANGED))) | NUMBER_TEMP
 			)
 
 		while True:
-			for index_0 in range(form_name_count):
-				value_0 = (numbers[index_0] & (~NUMBER_CHANGED))
-				numbers[index_0] = <int_least16_t>(value_0)
-				numbers[index_0 + form_name_count] = <int_least16_t>(value_0)
+			memcpy(
+				numbers + f_blocks[0],
+				numbers,
+				f_blocks[0] * sizeof(numbers[0])
+			)
 
-			result = solve_method1(form_name_count, form_blocks, numbers)
+			result = solve_method1(f_blocks, numbers)
 			if result != RESULT_UNCHANGED:
-				PyList_Append(
-					_places,
-					make_place(place_class, form_name_count, numbers, 1)
-				)
-				if (result & (RESULT_SOLVED | RESULT_ERROR)) == 0:
-					continue
-				if (result & (RESULT_SOLVED)) != 0:
-					solved_count += 1
-				self._places = PyList_AsTuple(_places)
-				return solved_count
+				child = 1
+			else:
+				result = solve_method2(f_blocks, numbers)
+				if result != RESULT_UNCHANGED:
+					child = 2
+				else:
+					result = solve_method3(f_blocks, numbers)
+					if result != RESULT_UNCHANGED:
+						child = 3
+					else:
+						break
 
-			result = solve_method2(form_name_count, form_blocks, numbers)
-			if result != RESULT_UNCHANGED:
-				PyList_Append(
-					_places,
-					make_place(place_class, form_name_count, numbers, 2)
-				)
-				if (result & (RESULT_SOLVED | RESULT_ERROR)) == 0:
-					continue
-				if (result & (RESULT_SOLVED)) != 0:
-					solved_count += 1
+			result |= check_numbers(f_blocks, numbers)
+			PyList_Append(
+				_places,
+				make_place(place_class, f_blocks[0], numbers, child)
+			)
+			if (result & (RESULT_SOLVED | RESULT_ERROR)) != 0:
+				self._tasks += Py_SIZE(_places)
 				self._places = PyList_AsTuple(_places)
-				return solved_count
+				return ((result & (RESULT_SOLVED)) != 0)
 
-			result = solve_method3(form_name_count, form_blocks, numbers)
-			if result != RESULT_UNCHANGED:
-				PyList_Append(
-					_places,
-					make_place(place_class, form_name_count, numbers, 3)
+			for index_0 in range(f_blocks[0]):
+				numbers[index_0] = <int_least16_t>(
+					numbers[index_0] & (~(NUMBER_CHANGED | NUMBER_DOUBLE_CROSS))
 				)
-				if (result & (RESULT_SOLVED | RESULT_ERROR)) == 0:
-					continue
-				if (result & (RESULT_SOLVED)) != 0:
-					solved_count += 1
-				self._places = PyList_AsTuple(_places)
-				return solved_count
-			break
 
 		# Assign a value to a single block whose answer has not been determined
 		# because it cannot be resolved any further.
 		index_0 = -1
-		value_2 = 10
-		for index_1 in range(form_name_count):
-			value_0 = numbers[index_1]
-			value_1 = __builtin_popcount(value_0 & NUMBER_MASK)
+		value_0 = 10
+		for index_1 in range(f_blocks[0]):
+			value_1 = __builtin_popcount(numbers[index_1] & NUMBER_MASK)
 			if value_1 == 2:
 				index_0 = index_1
 				break
 			elif value_1 > 2:
-				if value_1 < value_2:
+				if value_1 < value_0:
 					index_0 = index_1
-					value_2 = value_1
+					value_0 = value_1
 
+		new_solved_count = solved_count
 		if index_0 >= 0:
-			_children = []
+			_children_all = []
+			_children_solved = []
 			next_numbers = <int_least16_t *>(
-				malloc(form_name_count * sizeof(numbers[0]) * 2)
+				malloc(f_blocks[0] * sizeof(numbers[0]) * 2)
 			)
 			if next_numbers is NULL:
 				raise MemoryError()
 			try:
 				for index_1 in range(9):
-					if (value_0 & (1 << index_1)) == 0:
+					if (numbers[index_0] & (1 << index_1)) == 0:
 						continue
 
-					if solved_count >= MAX_SOLVED:
+					if new_solved_count >= MAX_SOLVED:
 						break
 					child = Answer()
 
 					# copy from numbers to next_numbers
-					for index_2 in range(index_0):
-						next_numbers[index_2] = <int_least16_t>(numbers[index_2] & (~NUMBER_CHANGED))
-					next_numbers[index_0] = <int_least16_t>((1 << index_1) | NUMBER_CHANGED)
-					for index_2 in range(index_0 + 1, form_name_count):
-						next_numbers[index_2] = <int_least16_t>(numbers[index_2] & (~NUMBER_CHANGED))
+					memcpy(
+						next_numbers,
+						numbers,
+						f_blocks[0] * sizeof(numbers[0])
+					)
+					next_numbers[index_0] = <int_least16_t>(
+						(1 << index_1) | NUMBER_CHANGED
+					)
 					result = (<Answer>(child)).solve(
 						place_class,
-						form_name_count,
-						form_blocks,
+						f_blocks,
 						next_numbers,
-						solved_count,
+						new_solved_count,
 						index_0
 					)
 					self._tasks += (<Answer>(child))._tasks
-					if result > solved_count:
-						PyList_Append(_children, child)
-					solved_count = result
+					PyList_Append(_children_all, child)
+					if result > 0:
+						PyList_Append(_children_solved, child)
+						new_solved_count += result
 			finally:
 				free(next_numbers)
 
-			if Py_SIZE(_children) == 1:
-				child = <object>(PyList_GET_ITEM(_children, 0))
+			result = Py_SIZE(_children_solved)
+			if result == 0:
+				self._children = PyList_AsTuple(_children_all)
+			elif result == 1:
+				child = <object>(PyList_GET_ITEM(_children_solved, 0))
 				PyList_SetSlice(
 					_places,
 					Py_SIZE(_places),
@@ -552,20 +1040,22 @@ cdef class Answer():
 				self._tasks -= Py_SIZE((<Answer>(child))._places)
 				self._children = (<Answer>(child))._children
 			else:
-				self._children = PyList_AsTuple(_children)
+				self._children = PyList_AsTuple(_children_solved)
 
 		self._tasks += Py_SIZE(_places)
 		self._places = PyList_AsTuple(_places)
-		return solved_count
+		return new_solved_count - solved_count
 
 
 	@property
 	def places(self):
 		return self._places
 
+
 	@property
 	def children(self):
 		return self._children
+
 
 	@property
 	def tasks(self):
@@ -714,7 +1204,7 @@ cdef class Cell:
 	def state(self):
 		cdef object result
 		cdef int_fast16_t value_0 = self.value_0
-		cdef int_fast16_t value_1 = (value_0 & (~NUMBER_MASK))
+		cdef int_fast16_t value_1 = <int_fast16_t>(value_0 & (~NUMBER_MASK))
 
 		if value_1 == (NUMBER_ERROR | NUMBER_FIXED):
 			result = ' f e'
@@ -725,7 +1215,17 @@ cdef class Cell:
 				result = ' u c e'
 			else:
 				result = ' c e'
-		elif value_1 == (NUMBER_ERROR):
+		elif value_1 == (NUMBER_ERROR | NUMBER_DOUBLE_CROSS):
+			if __builtin_popcount(value_0 & NUMBER_MASK) > 1:
+				result = ' u d e'
+			else:
+				result = ' d e'
+		elif value_1 == (NUMBER_ERROR | NUMBER_CHANGED | NUMBER_DOUBLE_CROSS):
+			if __builtin_popcount(value_0 & NUMBER_MASK) > 1:
+				result = ' u c d e'
+			else:
+				result = ' c d e'
+		elif value_1 == NUMBER_ERROR:
 			if __builtin_popcount(value_0 & NUMBER_MASK) > 1:
 				result = ' u e'
 			else:
@@ -739,6 +1239,16 @@ cdef class Cell:
 				result = ' u c'
 			else:
 				result = ' c'
+		elif value_1 == NUMBER_DOUBLE_CROSS:
+			if __builtin_popcount(value_0 & NUMBER_MASK) > 1:
+				result = ' u d'
+			else:
+				result = ' d'
+		elif value_1 == (NUMBER_CHANGED | NUMBER_DOUBLE_CROSS):
+			if __builtin_popcount(value_0 & NUMBER_MASK) > 1:
+				result = ' u c d'
+			else:
+				result = ' c d'
 		else:
 			if __builtin_popcount(value_0 & NUMBER_MASK) > 1:
 				result = ' u'
@@ -754,56 +1264,61 @@ cdef class Cell:
 		)
 
 
+	def __repr__(self):
+		return PyUnicode_Format(
+			'Cell(%x)',
+			(
+				PyLong_FromSsize_t(self.value_0),
+			)
+		)
+
+
+@cython.warn.undeclared(False)
 def get_answer(form_data, form_blocks):
 	cdef object self = Answer()
 	cdef object place_class
 	cdef Py_ssize_t result
-	cdef Py_ssize_t form_name_count
-	cdef void *numbers
-	cdef void *blocks
+	cdef int_least16_t *numbers
+	cdef Py_ssize_t *f_blocks
 
 	# allocating blocks information
-	blocks = malloc((Py_SIZE(<tuple?>(form_blocks)) * 9 + 1) * sizeof(Py_ssize_t))
-	if blocks is NULL:
+	f_blocks = <Py_ssize_t *>(
+		malloc(
+			(Py_SIZE(<tuple?>(form_blocks)) * 9 + 5) * sizeof(f_blocks[0])
+		)
+	)
+	if f_blocks is NULL:
 		raise MemoryError()
 	try:
-		place_class = parse_blocks(
-			form_blocks,
-			<Py_ssize_t *>(blocks)
+		place_class = parse_blocks(form_blocks, f_blocks)
+		numbers = <int_least16_t *>(
+			malloc(
+				f_blocks[0] * sizeof(numbers[0]) * 2
+			)
 		)
-		form_name_count = Py_SIZE(place_class._fields) - 1
-		numbers = malloc(form_name_count * sizeof(int_least16_t) * 2)
 		if numbers is NULL:
 			raise MemoryError()
 		try:
 			result = parse_data(
 				form_data,
 				place_class._fields,
-				<Py_ssize_t *>(blocks),
-				<int_least16_t *>(numbers),
+				f_blocks,
+				numbers
 			)
-			if result == RESULT_CHANGED:
+			if result == RESULT_UNCHANGED:
+				(<Answer>(self))._tasks = -1
+			else:
 				(<Answer>(self)).solve(
 					place_class,
-					form_name_count,
-					<Py_ssize_t *>(blocks),
-					<int_least16_t *>(numbers),
+					f_blocks,
+					numbers,
 					0,
 					-1
-				)
-			elif result != RESULT_UNCHANGED:
-				(<Answer>(self))._places = (
-					make_place(
-						place_class,
-						form_name_count,
-						<int_least16_t *>(numbers),
-						0
-					),
 				)
 		finally:
 			free(numbers)
 	finally:
-		free(blocks)
+		free(f_blocks)
 
 	return self
 
