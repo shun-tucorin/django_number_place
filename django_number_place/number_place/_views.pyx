@@ -1220,11 +1220,6 @@ cdef class Cell:
 				result = ' u d e'
 			else:
 				result = ' d e'
-		elif value_1 == (NUMBER_ERROR | NUMBER_CHANGED | NUMBER_DOUBLE_CROSS):
-			if __builtin_popcount(value_0 & NUMBER_MASK) > 1:
-				result = ' u c d e'
-			else:
-				result = ' c d e'
 		elif value_1 == NUMBER_ERROR:
 			if __builtin_popcount(value_0 & NUMBER_MASK) > 1:
 				result = ' u e'
@@ -1244,11 +1239,6 @@ cdef class Cell:
 				result = ' u d'
 			else:
 				result = ' d'
-		elif value_1 == (NUMBER_CHANGED | NUMBER_DOUBLE_CROSS):
-			if __builtin_popcount(value_0 & NUMBER_MASK) > 1:
-				result = ' u c d'
-			else:
-				result = ' c d'
 		else:
 			if __builtin_popcount(value_0 & NUMBER_MASK) > 1:
 				result = ' u'

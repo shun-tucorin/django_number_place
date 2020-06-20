@@ -102,7 +102,7 @@ td.d
 	}
 td.e
 	{
-	background-color: lightcoral;
+	background: radial-gradient(transparent, lightcoral);
 	}
 td.f
 	{
