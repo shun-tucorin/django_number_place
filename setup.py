@@ -93,7 +93,7 @@ def main():
 
 	setup(
 		name='django_number_place',
-		version='0.3',
+		version='0.4',
 		packages=[
 			'django_number_place',
 			'django_number_place.number_place',
