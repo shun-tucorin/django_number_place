@@ -6,9 +6,6 @@ from cpython.dict cimport (
 	PyDict_GetItem,
 	PyDict_SetItem,
 )
-from cpython.exc cimport (
-	PyErr_Format,
-)
 from cpython.long cimport (
 	PyLong_AsSsize_t,
 	PyLong_FromSsize_t,
@@ -32,13 +29,11 @@ from cpython.object cimport (
 )
 from cpython.ref cimport (
 	Py_INCREF,
-	Py_XDECREF,
 )
 from cpython.set cimport (
 	PySet_Add,
 	PySet_Clear,
 	PySet_Contains,
-	PySet_New,
 )
 from cpython.tuple cimport (
 	PyTuple_GET_ITEM,
@@ -46,7 +41,6 @@ from cpython.tuple cimport (
 	PyTuple_SET_ITEM,
 )
 from cpython.unicode cimport (
-	PyUnicode_DecodeLatin1,
 	PyUnicode_Format,
 	PyUnicode_GET_SIZE,
 )
