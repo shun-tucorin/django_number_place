@@ -54,6 +54,7 @@ from libc.string cimport (
 
 cdef extern from '<Python.h>':
 	Py_UCS4 PyUnicode_READ_CHAR(object o, Py_ssize_t index)
+	object __Pyx_PyDict_NewPresized(Py_ssize_t n)
 
 cdef extern from '<stdlib.h>' nogil:
 	ctypedef signed short int_fast16_t
@@ -180,7 +181,6 @@ cdef object parse_blocks(
 	cdef object names = set()
 	cdef object block
 	cdef object value_1
-	cdef object namedtuple
 	cdef object row_block_indexes = []
 	cdef object col_block_indexes = []
 	cdef object other_block_indexes = []
@@ -188,8 +188,6 @@ cdef object parse_blocks(
 	cdef Py_UCS4 col_name
 	cdef PyObject *object_0
 	cdef Py_ssize_t *temp_blocks
-
-	from collections import namedtuple
 
 	temp_blocks = <Py_ssize_t *>(
 		malloc(Py_SIZE(form_blocks) * 9 * sizeof(f_blocks[0]))
@@ -301,18 +299,7 @@ cdef object parse_blocks(
 	finally:
 		free(temp_blocks)
 
-	PyList_Append(field_names, 'method')
-	return namedtuple(
-		PyUnicode_Format(
-			'Place%x',
-			(
-				PyLong_FromSize_t(
-					PyObject_Hash(PyList_AsTuple(field_names))
-				),
-			)
-		),
-		field_names
-	)
+	return PyList_AsTuple(field_names)
 
 
 cdef inline Py_ssize_t check_numbers_block(
@@ -418,23 +405,26 @@ cdef Py_ssize_t parse_data(
 
 
 cdef object make_place(
-	object place_class,
-	Py_ssize_t form_name_count,
+	object field_names,
 	const int_least16_t *numbers,
 	object method
 ):
 	cdef Py_ssize_t index_0
-	cdef object values = PyTuple_New(form_name_count + 1)
 	cdef object value_0
+	cdef object result = __Pyx_PyDict_NewPresized(
+		Py_SIZE(field_names) + 1
+	)
 
-	for index_0 in range(form_name_count):
+	for index_0 in range(Py_SIZE(field_names)):
 		value_0 = Cell()
 		(<Cell>(value_0)).value_0 = <int_fast16_t>(numbers[index_0])
-		Py_INCREF(value_0)
-		PyTuple_SET_ITEM(values, index_0, value_0)
-	Py_INCREF(method)
-	PyTuple_SET_ITEM(values, form_name_count + 0, method)
-	return place_class(*values)
+		PyDict_SetItem(
+			result,
+			<object>(PyTuple_GET_ITEM(field_names, index_0)),
+			value_0
+		)
+	PyDict_SetItem(result, 'method', method)
+	return result
 
 
 cdef inline Py_ssize_t solve_method1_block(
@@ -819,7 +809,7 @@ cdef class Answer():
 
 	cdef Py_ssize_t solve(
 		self,
-		object place_class,
+		object field_names,
 		const Py_ssize_t *f_blocks,
 		int_least16_t *numbers,
 		Py_ssize_t solved_count
@@ -856,7 +846,7 @@ cdef class Answer():
 			result |= check_numbers(f_blocks, numbers)
 			PyList_Append(
 				self._places,
-				make_place(place_class, f_blocks[0], numbers, child)
+				make_place(field_names, numbers, child)
 			)
 			if (result & (RESULT_SOLVED | RESULT_ERROR)) != 0:
 				self._tasks += Py_SIZE(self._places)
@@ -911,8 +901,7 @@ cdef class Answer():
 					child = Answer()
 					(<Answer>(child))._places = [
 						make_place(
-							place_class,
-							f_blocks[0],
+							field_names,
 							next_numbers,
 							3
 						)
@@ -921,7 +910,7 @@ cdef class Answer():
 						(1 << index_1) | NUMBER_TEMP
 					)
 					result = (<Answer>(child)).solve(
-						place_class,
+						field_names,
 						f_blocks,
 						next_numbers,
 						new_solved_count
@@ -1174,7 +1163,7 @@ cdef class Cell:
 @cython.warn.maybe_uninitialized(False)
 def get_answer(form_data, form_blocks):
 	cdef object self = Answer()
-	cdef object place_class
+	cdef object field_names
 	cdef Py_ssize_t result
 	cdef int_least16_t *numbers
 	cdef Py_ssize_t *f_blocks
@@ -1188,7 +1177,7 @@ def get_answer(form_data, form_blocks):
 	if f_blocks is NULL:
 		raise MemoryError()
 	try:
-		place_class = parse_blocks(form_blocks, f_blocks)
+		field_names = parse_blocks(form_blocks, f_blocks)
 		numbers = <int_least16_t *>(
 			malloc(
 				f_blocks[0] * sizeof(numbers[0]) * 2
@@ -1199,7 +1188,7 @@ def get_answer(form_data, form_blocks):
 		try:
 			result = parse_data(
 				form_data,
-				place_class._fields,
+				field_names,
 				f_blocks,
 				numbers
 			)
@@ -1210,8 +1199,7 @@ def get_answer(form_data, form_blocks):
 				if (result & (RESULT_SOLVED | RESULT_ERROR)) != 0:
 					(<Answer>(self))._places = (
 						make_place(
-							place_class,
-							f_blocks[0],
+							field_names,
 							numbers,
 							0
 						),
@@ -1219,7 +1207,7 @@ def get_answer(form_data, form_blocks):
 				else:
 					(<Answer>(self))._places = []
 					(<Answer>(self)).solve(
-						place_class,
+						field_names,
 						f_blocks,
 						numbers,
 						0
