@@ -822,8 +822,7 @@ cdef class Answer():
 		object place_class,
 		const Py_ssize_t *f_blocks,
 		int_least16_t *numbers,
-		Py_ssize_t solved_count,
-		Py_ssize_t temp_index
+		Py_ssize_t solved_count
 	) except -1:
 		cdef Py_ssize_t result
 		cdef Py_ssize_t new_solved_count
@@ -833,33 +832,9 @@ cdef class Answer():
 		cdef int_fast16_t value_1
 		cdef int_least16_t *next_numbers
 		cdef object child
-		cdef object _places = []
 		cdef object _children_all
 		cdef object _children_solved
 
-
-		result = check_numbers(f_blocks, numbers)
-		if (result & (RESULT_SOLVED | RESULT_ERROR)) != 0:
-			PyList_Append(
-				_places,
-				make_place(
-					place_class,
-					f_blocks[0],
-					numbers,
-					0 if temp_index < 0 else 3
-				)
-			)
-			self._places = PyList_AsTuple(_places)
-			return ((result & (RESULT_SOLVED)) != 0)
-
-		if temp_index >= 0:
-			PyList_Append(
-				_places,
-				make_place(place_class, f_blocks[0], numbers, 3)
-			)
-			numbers[temp_index] = <int_least16_t>(
-				(numbers[temp_index] & (~(NUMBER_CHANGED))) | NUMBER_TEMP
-			)
 
 		while True:
 			memcpy(
@@ -880,12 +855,12 @@ cdef class Answer():
 
 			result |= check_numbers(f_blocks, numbers)
 			PyList_Append(
-				_places,
+				self._places,
 				make_place(place_class, f_blocks[0], numbers, child)
 			)
 			if (result & (RESULT_SOLVED | RESULT_ERROR)) != 0:
-				self._tasks += Py_SIZE(_places)
-				self._places = PyList_AsTuple(_places)
+				self._tasks += Py_SIZE(self._places)
+				self._places = PyList_AsTuple(self._places)
 				return ((result & (RESULT_SOLVED)) != 0)
 
 			for index_0 in range(f_blocks[0]):
@@ -923,7 +898,6 @@ cdef class Answer():
 
 					if new_solved_count >= MAX_SOLVED:
 						break
-					child = Answer()
 
 					# copy from numbers to next_numbers
 					memcpy(
@@ -934,12 +908,23 @@ cdef class Answer():
 					next_numbers[index_0] = <int_least16_t>(
 						(1 << index_1) | NUMBER_CHANGED
 					)
+					child = Answer()
+					(<Answer>(child))._places = [
+						make_place(
+							place_class,
+							f_blocks[0],
+							next_numbers,
+							3
+						)
+					]
+					next_numbers[index_0] = <int_least16_t>(
+						(1 << index_1) | NUMBER_TEMP
+					)
 					result = (<Answer>(child)).solve(
 						place_class,
 						f_blocks,
 						next_numbers,
-						new_solved_count,
-						index_0
+						new_solved_count
 					)
 					self._tasks += (<Answer>(child))._tasks
 					PyList_Append(_children_all, child)
@@ -955,9 +940,9 @@ cdef class Answer():
 			elif result == 1:
 				child = <object>(PyList_GET_ITEM(_children_solved, 0))
 				PyList_SetSlice(
-					_places,
-					Py_SIZE(_places),
-					Py_SIZE(_places),
+					self._places,
+					Py_SIZE(self._places),
+					Py_SIZE(self._places),
 					(<Answer>(child))._places
 				)
 				self._tasks -= Py_SIZE((<Answer>(child))._places)
@@ -965,8 +950,8 @@ cdef class Answer():
 			else:
 				self._children = PyList_AsTuple(_children_solved)
 
-		self._tasks += Py_SIZE(_places)
-		self._places = PyList_AsTuple(_places)
+		self._tasks += Py_SIZE(self._places)
+		self._places = PyList_AsTuple(self._places)
 		return new_solved_count - solved_count
 
 
@@ -1221,13 +1206,24 @@ def get_answer(form_data, form_blocks):
 			if result == RESULT_UNCHANGED:
 				(<Answer>(self))._tasks = -1
 			else:
-				(<Answer>(self)).solve(
-					place_class,
-					f_blocks,
-					numbers,
-					0,
-					-1
-				)
+				result = check_numbers(f_blocks, numbers)
+				if (result & (RESULT_SOLVED | RESULT_ERROR)) != 0:
+					(<Answer>(self))._places = (
+						make_place(
+							place_class,
+							f_blocks[0],
+							numbers,
+							0
+						),
+					)
+				else:
+					(<Answer>(self))._places = []
+					(<Answer>(self)).solve(
+						place_class,
+						f_blocks,
+						numbers,
+						0
+					)
 		finally:
 			free(numbers)
 	finally:
