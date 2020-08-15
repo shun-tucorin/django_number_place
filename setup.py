@@ -111,8 +111,8 @@ def main():
             'django_number_place.number_place': number_place_data_files,
         },
         license='BSD License',
-        description='simple Django app to solve Number Place'
-                    ' (called Sudoku) stepwise.',
+        description='Simple Django app to solve Number Place'
+                    ' (called Sudoku) in stages.',
         long_description=README,
         url='https://www.github.com/shun-tucorin/django_number_place',
         author='shun',
