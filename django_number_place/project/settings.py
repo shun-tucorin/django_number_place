@@ -33,29 +33,29 @@ ALLOWED_HOSTS = ['*']
 # Application definition
 
 INSTALLED_APPS = [
-	'django_number_place.number_place.apps.AppConfig',
-	'django.contrib.contenttypes',
-	'django.contrib.staticfiles',
+    'django_number_place.number_place.apps.AppConfig',
+    'django.contrib.contenttypes',
+    'django.contrib.staticfiles',
 ]
 
 MIDDLEWARE = [
-	'django.middleware.clickjacking.XFrameOptionsMiddleware',
-	'django.middleware.common.CommonMiddleware',
-	'django.middleware.security.SecurityMiddleware',
+    'django.middleware.clickjacking.XFrameOptionsMiddleware',
+    'django.middleware.common.CommonMiddleware',
+    'django.middleware.security.SecurityMiddleware',
 ]
 ROOT_URLCONF = 'django_number_place.project.urls'
 TEMPLATES = [
-	{
-		'BACKEND': 'django.template.backends.django.DjangoTemplates',
-		'DIRS': [],
-		'APP_DIRS': True,
-		'OPTIONS': {
-			'context_processors': [
-				'django.template.context_processors.debug',
-				'django.template.context_processors.request',
-			],
-		},
-	},
+    {
+        'BACKEND': 'django.template.backends.django.DjangoTemplates',
+        'DIRS': [],
+        'APP_DIRS': True,
+        'OPTIONS': {
+            'context_processors': [
+                'django.template.context_processors.debug',
+                'django.template.context_processors.request',
+            ],
+        },
+    },
 ]
 
 WSGI_APPLICATION = 'django_number_place.project.wsgi.application'
