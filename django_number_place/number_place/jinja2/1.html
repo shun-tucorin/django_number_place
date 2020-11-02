@@ -1,0 +1,128 @@
+<!DOCTYPE html>
+<html>
+ <head>
+  <link rel="stylesheet" type="text/css" href="/number_place/static/0.css" />
+  <title>Solve 9x9 Number Place (called Sudoku) in stages.</title>
+ </head>
+ <body>
+  <form action="" method="post">
+   <table class="q">
+    <tbody>
+     <tr>
+      <td class="p0">{% filter trim %}{{ form.A1 }}{% endfilter %}</td>
+      <td class="p1">{% filter trim %}{{ form.A2 }}{% endfilter %}</td>
+      <td class="p2">{% filter trim %}{{ form.A3 }}{% endfilter %}</td>
+      <td class="p0">{% filter trim %}{{ form.A4 }}{% endfilter %}</td>
+      <td class="p1">{% filter trim %}{{ form.A5 }}{% endfilter %}</td>
+      <td class="p2">{% filter trim %}{{ form.A6 }}{% endfilter %}</td>
+      <td class="p0">{% filter trim %}{{ form.A7 }}{% endfilter %}</td>
+      <td class="p1">{% filter trim %}{{ form.A8 }}{% endfilter %}</td>
+      <td class="p2">{% filter trim %}{{ form.A9 }}{% endfilter %}</td>
+     </tr>
+     <tr>
+      <td class="p3">{% filter trim %}{{ form.B1 }}{% endfilter %}</td>
+      <td class="p4">{% filter trim %}{{ form.B2 }}{% endfilter %}</td>
+      <td class="p5">{% filter trim %}{{ form.B3 }}{% endfilter %}</td>
+      <td class="p3">{% filter trim %}{{ form.B4 }}{% endfilter %}</td>
+      <td class="p4">{% filter trim %}{{ form.B5 }}{% endfilter %}</td>
+      <td class="p5">{% filter trim %}{{ form.B6 }}{% endfilter %}</td>
+      <td class="p3">{% filter trim %}{{ form.B7 }}{% endfilter %}</td>
+      <td class="p4">{% filter trim %}{{ form.B8 }}{% endfilter %}</td>
+      <td class="p5">{% filter trim %}{{ form.B9 }}{% endfilter %}</td>
+     </tr>
+     <tr>
+      <td class="p6">{% filter trim %}{{ form.C1 }}{% endfilter %}</td>
+      <td class="p7">{% filter trim %}{{ form.C2 }}{% endfilter %}</td>
+      <td class="p8">{% filter trim %}{{ form.C3 }}{% endfilter %}</td>
+      <td class="p6">{% filter trim %}{{ form.C4 }}{% endfilter %}</td>
+      <td class="p7">{% filter trim %}{{ form.C5 }}{% endfilter %}</td>
+      <td class="p8">{% filter trim %}{{ form.C6 }}{% endfilter %}</td>
+      <td class="p6">{% filter trim %}{{ form.C7 }}{% endfilter %}</td>
+      <td class="p7">{% filter trim %}{{ form.C8 }}{% endfilter %}</td>
+      <td class="p8">{% filter trim %}{{ form.C9 }}{% endfilter %}</td>
+     </tr>
+     <tr>
+      <td class="p0">{% filter trim %}{{ form.D1 }}{% endfilter %}</td>
+      <td class="p1">{% filter trim %}{{ form.D2 }}{% endfilter %}</td>
+      <td class="p2">{% filter trim %}{{ form.D3 }}{% endfilter %}</td>
+      <td class="p0">{% filter trim %}{{ form.D4 }}{% endfilter %}</td>
+      <td class="p1">{% filter trim %}{{ form.D5 }}{% endfilter %}</td>
+      <td class="p2">{% filter trim %}{{ form.D6 }}{% endfilter %}</td>
+      <td class="p0">{% filter trim %}{{ form.D7 }}{% endfilter %}</td>
+      <td class="p1">{% filter trim %}{{ form.D8 }}{% endfilter %}</td>
+      <td class="p2">{% filter trim %}{{ form.D9 }}{% endfilter %}</td>
+     </tr>
+     <tr>
+      <td class="p3">{% filter trim %}{{ form.E1 }}{% endfilter %}</td>
+      <td class="p4">{% filter trim %}{{ form.E2 }}{% endfilter %}</td>
+      <td class="p5">{% filter trim %}{{ form.E3 }}{% endfilter %}</td>
+      <td class="p3">{% filter trim %}{{ form.E4 }}{% endfilter %}</td>
+      <td class="p4">{% filter trim %}{{ form.E5 }}{% endfilter %}</td>
+      <td class="p5">{% filter trim %}{{ form.E6 }}{% endfilter %}</td>
+      <td class="p3">{% filter trim %}{{ form.E7 }}{% endfilter %}</td>
+      <td class="p4">{% filter trim %}{{ form.E8 }}{% endfilter %}</td>
+      <td class="p5">{% filter trim %}{{ form.E9 }}{% endfilter %}</td>
+     </tr>
+     <tr>
+      <td class="p6">{% filter trim %}{{ form.F1 }}{% endfilter %}</td>
+      <td class="p7">{% filter trim %}{{ form.F2 }}{% endfilter %}</td>
+      <td class="p8">{% filter trim %}{{ form.F3 }}{% endfilter %}</td>
+      <td class="p6">{% filter trim %}{{ form.F4 }}{% endfilter %}</td>
+      <td class="p7">{% filter trim %}{{ form.F5 }}{% endfilter %}</td>
+      <td class="p8">{% filter trim %}{{ form.F6 }}{% endfilter %}</td>
+      <td class="p6">{% filter trim %}{{ form.F7 }}{% endfilter %}</td>
+      <td class="p7">{% filter trim %}{{ form.F8 }}{% endfilter %}</td>
+      <td class="p8">{% filter trim %}{{ form.F9 }}{% endfilter %}</td>
+     </tr>
+     <tr>
+      <td class="p0">{% filter trim %}{{ form.G1 }}{% endfilter %}</td>
+      <td class="p1">{% filter trim %}{{ form.G2 }}{% endfilter %}</td>
+      <td class="p2">{% filter trim %}{{ form.G3 }}{% endfilter %}</td>
+      <td class="p0">{% filter trim %}{{ form.G4 }}{% endfilter %}</td>
+      <td class="p1">{% filter trim %}{{ form.G5 }}{% endfilter %}</td>
+      <td class="p2">{% filter trim %}{{ form.G6 }}{% endfilter %}</td>
+      <td class="p0">{% filter trim %}{{ form.G7 }}{% endfilter %}</td>
+      <td class="p1">{% filter trim %}{{ form.G8 }}{% endfilter %}</td>
+      <td class="p2">{% filter trim %}{{ form.G9 }}{% endfilter %}</td>
+     </tr>
+     <tr>
+      <td class="p3">{% filter trim %}{{ form.H1 }}{% endfilter %}</td>
+      <td class="p4">{% filter trim %}{{ form.H2 }}{% endfilter %}</td>
+      <td class="p5">{% filter trim %}{{ form.H3 }}{% endfilter %}</td>
+      <td class="p3">{% filter trim %}{{ form.H4 }}{% endfilter %}</td>
+      <td class="p4">{% filter trim %}{{ form.H5 }}{% endfilter %}</td>
+      <td class="p5">{% filter trim %}{{ form.H6 }}{% endfilter %}</td>
+      <td class="p3">{% filter trim %}{{ form.H7 }}{% endfilter %}</td>
+      <td class="p4">{% filter trim %}{{ form.H8 }}{% endfilter %}</td>
+      <td class="p5">{% filter trim %}{{ form.H9 }}{% endfilter %}</td>
+     </tr>
+     <tr>
+      <td class="p6">{% filter trim %}{{ form.I1 }}{% endfilter %}</td>
+      <td class="p7">{% filter trim %}{{ form.I2 }}{% endfilter %}</td>
+      <td class="p8">{% filter trim %}{{ form.I3 }}{% endfilter %}</td>
+      <td class="p6">{% filter trim %}{{ form.I4 }}{% endfilter %}</td>
+      <td class="p7">{% filter trim %}{{ form.I5 }}{% endfilter %}</td>
+      <td class="p8">{% filter trim %}{{ form.I6 }}{% endfilter %}</td>
+      <td class="p6">{% filter trim %}{{ form.I7 }}{% endfilter %}</td>
+      <td class="p7">{% filter trim %}{{ form.I8 }}{% endfilter %}</td>
+      <td class="p8">{% filter trim %}{{ form.I9 }}{% endfilter %}</td>
+     </tr>
+    </tbody>
+   </table>
+   <p>
+    <input type="submit" value="Solve!"/>
+    &nbsp;&nbsp;
+    <input type="reset" value="Reset"/>
+   </p>
+  </form>{% if answer.tasks >= 0 %}
+  <table class="a">
+   <tbody>
+    <tr>
+     <td>
+      <div>number of procedures: {{ answer.tasks }}</div>{% include '1.sub.html' %}
+     </td>
+    </tr>
+   </tbody>
+  </table>{% endif %}
+ </body>
+</html>

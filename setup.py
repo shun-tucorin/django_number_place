@@ -93,7 +93,7 @@ def main():
         README = fp.read()
 
     number_place_data_files = []
-    for name in ('static', 'templates'):
+    for name in ('static', 'jinja2'):
         for file_path in number_place_path.joinpath(name).glob('**/*'):
             number_place_data_files.append(
                 str(file_path.relative_to(number_place_path))
@@ -120,8 +120,8 @@ def main():
         classifiers=[
             'Environment :: Web Environment',
             'Framework :: Django',
-            'Framework :: Django :: 2.2',
             'Framework :: Django :: 3.0',
+            'Framework :: Django :: 3.1',
             'Intended Audience :: Developers',
             'License :: OSI Approved :: BSD License',
             'Operating System :: OS Independent',
