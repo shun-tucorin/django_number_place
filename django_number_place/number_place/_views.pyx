@@ -1079,7 +1079,7 @@ cdef inline Py_ssize_t find_candidate_index(
 	const int_fast16_t *block_items,
 	const int_least16_t *number_items
 ) nogil:
-	cdef Py_ssize_t index_0 = 0
+	cdef Py_ssize_t index_0 = -1
 	cdef Py_ssize_t index_1
 	cdef int_fast16_t value_0 = 10
 	cdef int_fast16_t value_1
@@ -1294,43 +1294,44 @@ cdef class Answer():
 				# Assign a value to a single block whose answer has not been determined
 				# because it cannot be resolved any further.
 				index_0 = find_candidate_index(block_items, number_items)
-				for number_bit in range(9):
-					number_bit = (1 << number_bit)
-					if (number_items[index_0] & number_bit) == 0:
-						continue
-					if solved_count + new_solved_count >= MAX_SOLVED:
-						break
+				if index_0 >= 0:
+					for number_bit in range(9):
+						number_bit = (1 << number_bit)
+						if (number_items[index_0] & number_bit) == 0:
+							continue
+						if solved_count + new_solved_count >= MAX_SOLVED:
+							break
 
-					number_items[index_0] = <int_least16_t>(
-						number_bit | NUMBER_CHANGED
-					)
-					child = Answer()
-					(<Answer>(child))._places = [
-						make_place(
-							field_names,
-							number_items,
-							3
+						number_items[index_0] = <int_least16_t>(
+							number_bit | NUMBER_CHANGED
 						)
-					]
-					number_items[index_0] = <int_least16_t>(
-						number_bit | NUMBER_TEMP
-					)
-					result = (<Answer>(child)).solve(
-						field_names,
-						block_items,
-						number_items,
-						solved_count + new_solved_count
-					)
-					memcpy(
-						number_items,
-						saved_number_items,
-						block_items[0] * sizeof(number_items[0])
-					)
-					self._tasks += (<Answer>(child))._tasks
-					PyList_Append(self._children, child)
-					if result > 0:
-						PyList_Append(_children, child)
-						new_solved_count += result
+						child = Answer()
+						(<Answer>(child))._places = [
+							make_place(
+								field_names,
+								number_items,
+								3
+							)
+						]
+						number_items[index_0] = <int_least16_t>(
+							number_bit | NUMBER_TEMP
+						)
+						result = (<Answer>(child)).solve(
+							field_names,
+							block_items,
+							number_items,
+							solved_count + new_solved_count
+						)
+						memcpy(
+							number_items,
+							saved_number_items,
+							block_items[0] * sizeof(number_items[0])
+						)
+						self._tasks += (<Answer>(child))._tasks
+						PyList_Append(self._children, child)
+						if result > 0:
+							PyList_Append(_children, child)
+							new_solved_count += result
 
 		finally:
 			free(saved_number_items)
