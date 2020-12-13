@@ -101,7 +101,7 @@ def main():
 
     setup(
         name='django_number_place',
-        version='0.6',
+        version='0.7',
         packages=[
             'django_number_place',
             'django_number_place.number_place',
