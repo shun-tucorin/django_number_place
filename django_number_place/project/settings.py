@@ -19,7 +19,7 @@ BASE_DIR = path.dirname(path.dirname(path.abspath(__file__)))
 
 
 # Quick-start development settings - unsuitable for production
-# See https://docs.djangoproject.com/en/2.2/howto/deployment/checklist/
+# See https://docs.djangoproject.com/en/3.0/howto/deployment/checklist/
 
 # SECURITY WARNING: keep the secret key used in production secret!
 SECRET_KEY = '5l(4t=1c^-e(rsz#&0)=m4(guh-n0nt=)a8%^msaijglf&&3--'
@@ -63,19 +63,19 @@ WSGI_APPLICATION = 'django_number_place.project.wsgi.application'
 
 
 # Database
-# https://docs.djangoproject.com/en/2.2/ref/settings/#databases
+# https://docs.djangoproject.com/en/3.0/ref/settings/#databases
 
 DATABASES = {
 }
 
 # Password validation
-# https://docs.djangoproject.com/en/2.2/ref/settings/#auth-password-validators
+# https://docs.djangoproject.com/en/3.0/ref/settings/#auth-password-validators
 
 AUTH_PASSWORD_VALIDATORS = [
 ]
 
 # Internationalization
-# https://docs.djangoproject.com/en/2.2/topics/i18n/
+# https://docs.djangoproject.com/en/3.0/topics/i18n/
 LANGUAGE_CODE = 'en-us'
 TIME_ZONE = 'GMT'
 USE_I18N = True
@@ -83,5 +83,5 @@ USE_L10N = False
 USE_TZ = True
 
 # Static files (CSS, JavaScript, Images)
-# https://docs.djangoproject.com/en/2.2/howto/static-files/
-STATIC_URL = '/number_place/static/'
+# https://docs.djangoproject.com/en/3.0/howto/static-files/
+
